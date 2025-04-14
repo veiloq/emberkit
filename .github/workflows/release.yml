@@ -52,7 +52,7 @@ jobs:
 
       - name: Run GoReleaser
         if: steps.check_tag.outputs.tag_exists == 'false'
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         # Run only if the tagger step succeeded (meaning the tag was created and pushed)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
