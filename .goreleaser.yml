@@ -1,0 +1,164 @@
+# .goreleaser.yml
+# Visit https://goreleaser.com/customization/ for more options
+project_name: emberkit
+
+version: 1
+
+# Environment variables can be used to customize behavior (e.g., for Gitea)
+# GORELEASER_CHANGELOG_USE=github (for GitHub API changelog)
+# GITEA_API_URL=https://your.gitea/api/v1
+# GITEA_DOWNLOAD_URL=https://your.gitea
+
+before:
+  hooks:
+    # Ensure dependencies are tidy before release
+    - go mod tidy
+    # You could add go generate ./... here if needed
+
+builds:
+  # Skip building binaries for a library project
+  - skip: true
+  # Example for building a CLI (if this were one):
+  # - env:
+  #     - CGO_ENABLED=0
+  #   goos:
+  #     - linux
+  #     - windows
+  #     - darwin
+  #   goarch:
+  #     - amd64
+  #     - arm64
+  #   # Optionally inject version info using ldflags
+  #   ldflags:
+  #     - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser
+  # git tag v0.202504.0
+archives:
+  # Create source archives (tar.gz, zip)
+  - id: tarball
+    format: tar.gz
+    # this name template makes the OS and Arch compatible with the results of uname.
+    name_template: '{{ .ProjectName }}_{{ .Version }}_source'
+    files:
+      - LICENSE
+      - README.md
+      - go.mod
+      - go.sum
+      - '**/*.go'
+      - 'migrations/**/*' # Include migrations directory
+      - atlas.hcl
+  - id: zip
+    format: zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_source'
+    files:
+      - LICENSE
+      - README.md
+      - go.mod
+      - go.sum
+      - '**/*.go'
+      - 'migrations/**/*' # Include migrations directory
+      - atlas.hcl
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  # Example: If current version is v0.202504.1, next snapshot is v0.202504.2-next
+  # Note: This assumes the PATCH part is the last segment after the final dot.
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  # Use GitHub API for richer changelogs if GORELEASER_CHANGELOG_USE=github is set,
+  # otherwise fallback to plain git log for compatibility (e.g., Gitea).
+  # GoReleaser will attempt auto-detection based on environment (GITHUB_TOKEN, GITEA_TOKEN).
+  # use: "{{ .Env.GORELEASER_CHANGELOG_USE | default \"git\" }}" # Removed due to schema validation issue
+  sort: asc
+  filters:
+    # Exclude less relevant commits from the changelog
+    exclude:
+      - '^chore:'
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+      - '\(?i\)skip ci' # Case-insensitive skip ci
+  groups:
+    - title: "Features"
+      regexp: '(?i)^.*feat.*$' # Case-insensitive feat
+      order: 0
+    - title: "Bug Fixes"
+      regexp: '(?i)^.*fix.*$' # Case-insensitive fix
+      order: 1
+    - title: "Other Changes"
+      order: 999 # Catches anything else
+
+release:
+  # Repo details are usually inferred from the git remote.
+  # Explicitly configure only if needed or for Gitea.
+  github:
+    owner: veiloq
+    name: emberkit
+  # gitea:
+  #   owner: "{{ .Env.GITEA_OWNER }}" # Set GITEA_OWNER env var
+  #   name: "{{ .Env.GITEA_REPO }}"  # Set GITEA_REPO env var
+
+  # If set to true, will not auto-publish the release. Useful for testing.
+  draft: false
+
+  # If set to true, will mark the release as a pre-release.
+  # 'auto' marks as pre-release if tag contains -, like v2025.04.0-rc1
+  prerelease: auto
+
+  # You can change the name of the GitHub/Gitea release.
+  # Default is `{{.Tag}}`
+  name_template: "{{.ProjectName}} {{.Tag}}"
+
+# Gitea URLs - Required if releasing to Gitea
+# Set GITEA_API_URL and GITEA_DOWNLOAD_URL environment variables
+# gitea_urls:
+#   api: "{{ .Env.GITEA_API_URL }}"
+#   download: "{{ .Env.GITEA_DOWNLOAD_URL }}"
+  # skip_tls_verify: false # Set to true for self-signed certs
+
+# Signing and SBOM generation are skipped by default by not including `signs` or `sboms` sections.
+# skip_sign: true # Removed, invalid property
+# skip_sbom: true # Removed, invalid property
+
+# --- Commented out examples for advanced features ---
+
+# signs:
+#   # Example using Cosign for signing artifacts
+#   - artifacts: checksum
+#     cmd: cosign
+#     env:
+#       - COSIGN_EXPERIMENTAL=1
+#     args:
+#       - sign-blob
+#       - "--key=path/to/your/cosign.key" # Use secrets for key/password in CI
+#       # - "--password={{ .Env.COSIGN_PASSWORD }}"
+#       - "--output-signature=${signature}"
+#       - "${artifact}"
+#     output: true # Capture signature output
+
+# sboms:
+#   - artifacts: archive # Generate SBOM for source archives
+#     # Example using syft
+#     cmd: syft
+#     args:
+#       - "dir:." # Scan the source directory
+#       - "-o=spdx-json=${sbom}" # Output in SPDX JSON format
+
+# docker_signs:
+#   # Example using Cosign for signing Docker images
+#   - cmd: cosign
+#     artifacts: images
+#     env:
+#       - COSIGN_EXPERIMENTAL=1
+#     args:
+#       - sign
+#       - "--key=path/to/your/cosign.key"
+#       # - "--password={{ .Env.COSIGN_PASSWORD }}"
+#       - "${artifact}"
+
+# Modelines, see https://goreleaser.com/customization/modelines
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
