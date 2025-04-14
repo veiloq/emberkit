@@ -6,7 +6,7 @@
 
 *   **Isolated Environments:** Starts an embedded PostgreSQL instance or uses a shared one, creating a unique database for each test.
 *   **Automatic Cleanup:** Integrates with `testing.T` to automatically stop the server, drop the test database, and clean up runtime files.
-*   **Migration Support:** Built-in support for [Atlas](https://github.com/ariga/atlas) migrations and a flexible `Migrator` interface for custom solutions.
+*   **Migration Support (OPTIONAL):** Built-in support for [Atlas](https://github.com/ariga/atlas) migrations and a flexible `Migrator` interface for custom solutions.
 *   **Transaction Helpers:** Provides `RunTx` and `RunSQLTx` helpers to execute test logic within automatically rolled-back transactions (`pgx` and `database/sql`).
 *   **Connection Pooling:** Offers ready-to-use `*sql.DB` and `*pgxpool.Pool` connection pools.
 *   **Customization Hooks:** Allows injecting custom logic before migrations (`WithBeforeMigrationHook`) and after connection (`WithAfterConnectionHook`).
