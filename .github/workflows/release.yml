@@ -31,7 +31,7 @@ jobs:
 
       - name: Set CalVer Tag
         run: |
-          MAJOR_VER=$(cat MAJOR)
+          MAJOR_VER=$(cat MAJOR 2>/dev/null || echo 1)
           PATCH_VER=$(cat PATCH)
           DATE_PART=$(date +'%Y%m')
           VERSION="v${MAJOR_VER}.${DATE_PART}.${PATCH_VER}"
