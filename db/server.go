@@ -1,3 +1,5 @@
+// Package db provides functionality for managing the embedded PostgreSQL server
+// instance used by emberkit, including starting, stopping, and port assignment.
 package db
 
 import (
@@ -11,8 +13,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// assignRandomPort assigns a random port if config.Port is 0.
-// Modifies the config in place.
+// AssignRandomPort checks if the Port in the provided Config is 0. If it is,
+// it finds a free TCP port on the specified host (or localhost by default) and
+// updates the Config's Port field with the assigned port number.
+// It modifies the provided config pointer directly.
 func AssignRandomPort(config *config.Config, logger *zap.Logger) error {
 	if config.Port == 0 {
 		// GetFreePort is defined in port.go within the same package
@@ -26,8 +30,14 @@ func AssignRandomPort(config *config.Config, logger *zap.Logger) error {
 	return nil
 }
 
-// startServer initializes and starts the embedded PostgreSQL server.
-// It takes the configuration and logger, and returns the server instance or an error.
+// StartServer initializes and starts an embedded PostgreSQL server instance using
+// the configuration provided in `config`. It uses the `instanceWorkDir` for storing
+// runtime data specific to this server instance.
+//
+// It configures the embedded server (version, port, credentials, paths, logger,
+// timeout) based on the `config` and then attempts to start it.
+// Returns a pointer to the started `embeddedpostgres.EmbeddedPostgres` instance
+// or an error if startup fails.
 func StartServer(ctx context.Context, config config.Config, instanceWorkDir string, logger *zap.Logger) (*embeddedpostgres.EmbeddedPostgres, error) {
 	embeddedPostgresConfig := embeddedpostgres.DefaultConfig().
 		Version(embeddedpostgres.PostgresVersion(config.Version)).
@@ -68,8 +78,14 @@ func StartServer(ctx context.Context, config config.Config, instanceWorkDir stri
 	return embeddedDB, nil
 }
 
-// stopEmbeddedServer creates a cleanup function that stops the given embedded server instance.
-// It uses a pointer-to-pointer for embeddedDB to allow setting the original variable to nil upon successful stop.
+// StopEmbeddedServer returns a cleanup function suitable for use with
+// `cleanup.Manager`. The returned function stops the embedded PostgreSQL server
+// instance pointed to by `embeddedDBPtr`.
+//
+// It takes a pointer-to-a-pointer (`**embeddedpostgres.EmbeddedPostgres`) to the
+// server instance. This allows the cleanup function to set the original variable
+// to `nil` after successfully stopping the server, preventing potential issues
+// with attempting to stop an already stopped server.
 func StopEmbeddedServer(embeddedDBPtr **embeddedpostgres.EmbeddedPostgres, logger *zap.Logger) cleanup.Func {
 	return func() error {
 		// Dereference the pointer-to-pointer to get the actual embeddedDB instance pointer.

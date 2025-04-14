@@ -1,3 +1,5 @@
+// Package db also includes functions related to database management tasks like
+// creating, dropping, and generating unique names for test databases within emberkit.
 package db
 
 import (
@@ -15,16 +17,20 @@ import (
 	"go.uber.org/zap"
 )
 
-// createDatabase connects to the admin DB and creates the specified test DB.
-// It returns the DSN used to connect to the admin DB and an error.
-// The testDBName must be generated beforehand.
-func CreateDatabase(ctx context.Context, config config.Config, testDBName string, logger *zap.Logger) (dsn string, err error) {
-	dsn = config.DSN() // DSN for the initial/admin database (e.g., 'postgres')
-	logger.Debug("Connecting to admin database to create test database", zap.String("db", config.Database), zap.String("dsn", dsn))
+// CreateDatabase connects to the administrative database (e.g., "postgres") specified
+// in the config, using the provided admin DSN, and executes a `CREATE DATABASE`
+// command to create the uniquely named test database (`testDBName`).
+//
+// It ensures connectivity to the admin database before attempting creation.
+// Returns the admin DSN used (for potential use in cleanup registration) and an
+// error if connection or creation fails.
+func CreateDatabase(ctx context.Context, config config.Config, testDBName string, logger *zap.Logger) (adminDSN string, err error) {
+	adminDSN = config.DSN() // DSN for the initial/admin database (e.g., 'postgres')
+	logger.Debug("Connecting to admin database to create test database", zap.String("db", config.Database), zap.String("dsn", adminDSN))
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("postgres", adminDSN)
 	if err != nil {
-		return dsn, fmt.Errorf("failed to open connection to admin database '%s': %w", config.Database, err)
+		return adminDSN, fmt.Errorf("failed to open connection to admin database '%s': %w", config.Database, err)
 	}
 	defer db.Close() // Close admin connection when this function scope ends
 
@@ -32,7 +38,7 @@ func CreateDatabase(ctx context.Context, config config.Config, testDBName string
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err = db.PingContext(pingCtx); err != nil {
-		return dsn, fmt.Errorf("failed to ping admin database '%s': %w", config.Database, err)
+		return adminDSN, fmt.Errorf("failed to ping admin database '%s': %w", config.Database, err)
 	}
 	logger.Debug("Successfully connected to admin database", zap.String("database", config.Database))
 
@@ -46,16 +52,21 @@ func CreateDatabase(ctx context.Context, config config.Config, testDBName string
 		// Attempt to clean up if DB creation failed partially (though unlikely for CREATE DATABASE)
 		// We don't have the drop function registered yet, so manual attempt might be complex.
 		// Best effort is to return the error.
-		return dsn, fmt.Errorf("failed to execute create database command for %q: %w", testDBName, err)
+		return adminDSN, fmt.Errorf("failed to execute create database command for %q: %w", testDBName, err)
 	}
 
 	logger.Info("Successfully created test database", zap.String("database", testDBName))
 	// Return the admin DSN so the caller can register the drop function.
-	return dsn, nil
+	return adminDSN, nil
 }
 
-// dropTestDatabaseFunc returns a cleanup function to drop the specified test database.
-// It requires the DSN of the admin database to connect for dropping.
+// DropTestDatabaseFunc returns a cleanup function suitable for use with
+// `cleanup.Manager`. The returned function connects to the administrative database
+// using `adminDSN`, terminates any active connections to the `testDBName`, and
+// then drops the `testDBName` database.
+//
+// It respects the `keepDatabase` flag; if true, it logs that the drop is skipped
+// and returns nil. It includes timeouts and logging for robustness during cleanup.
 func DropTestDatabaseFunc(adminDSN, testDBName string, keepDatabase bool, logger *zap.Logger) cleanup.Func {
 	return func() error {
 		if keepDatabase {
@@ -102,7 +113,12 @@ func DropTestDatabaseFunc(adminDSN, testDBName string, keepDatabase bool, logger
 	}
 }
 
-// generateUniqueDBName creates a sanitized, unique database name.
+// GenerateUniqueDBName creates a unique, sanitized database or runtime directory name
+// suitable for use with PostgreSQL. It combines the given prefix with a random
+// hexadecimal string.
+//
+// The name is lowercased, hyphens are replaced with underscores, and it's truncated
+// to a maximum length of 63 characters to comply with PostgreSQL identifier limits.
 func GenerateUniqueDBName(prefix string) (string, error) {
 	b := make([]byte, 8) // 8 bytes = 16 hex characters
 	if _, err := rand.Read(b); err != nil {

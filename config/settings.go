@@ -1,3 +1,5 @@
+// Package config defines the configuration structures and functional options
+// used to customize the behavior of the emberkit testing toolkit.
 package config
 
 import (
@@ -11,7 +13,11 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Settings holds configuration applied via functional options.
+// Settings holds configuration values provided via functional Option functions.
+// These settings customize various aspects of the EmberKit instance, such as
+// migration behavior, transaction options, logging, and hooks.
+// It is distinct from the final `Config` struct, which holds the resolved values
+// used to run the database instance.
 type Settings struct {
 	atlasHCLPath        string             // Path to the atlas.hcl file
 	migrator            migration.Migrator // Migrator instance (defaults to NoOpMigrator)
@@ -76,13 +82,13 @@ func (sts *Settings) SharedConfig() Config {
 	return sts.sharedConfig
 }
 
-// --- Setters ---
-
 func (sts *Settings) SetMigrator(m migration.Migrator) {
 	sts.migrator = m
 }
 
-// Option defines a function type for configuring the test kit.
+// Option defines the functional option type used to configure an EmberKit instance.
+// Functions matching this signature (e.g., WithKeepDatabase, WithAtlas) are passed
+// to NewEmberKit to customize its setup and behavior.
 type Option func(*Settings)
 
 // WithAtlasHCLPath specifies the path to the atlas.hcl configuration file.
@@ -166,8 +172,13 @@ func WithSharedServer(dsn string, cfg Config) Option {
 	}
 }
 
-// applyOptions processes functional options and merges them into an initial Config.
-// It returns the processed Settings struct and the final merged Config.
+// ApplyOptions takes an initial base Config and a slice of Option functions.
+// It initializes a Settings struct with defaults, applies all provided Option
+// functions to populate the Settings, and then merges the initial Config with
+// the populated Settings to produce the final, resolved Config.
+//
+// It returns the populated Settings struct (containing hooks, migrator, etc.)
+// and the final merged Config struct used for running the EmberKit instance.
 func ApplyOptions(initialConfig *Config, options ...Option) (*Settings, Config) {
 	// Initialize with defaults, including the NoOpMigrator
 	settings := &Settings{
@@ -177,6 +188,7 @@ func ApplyOptions(initialConfig *Config, options ...Option) (*Settings, Config) 
 		startupParams: make(map[string]string),
 		zapOptions:    make([]zap.Option, 0),
 	}
+	// Apply provided functional options to the settings struct
 	for _, opt := range options {
 		opt(settings)
 	}

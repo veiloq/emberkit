@@ -1,3 +1,6 @@
+// Package connection handles the creation, management, and cleanup of database
+// connections (both standard library `sql.DB` and `pgxpool.Pool`) for the
+// isolated test database used by emberkit.
 package connection
 
 import (
@@ -13,8 +16,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// connectPools connects the sql.DB and pgxpool.Pool to the specified test DB.
-// It returns the sql.DB pool, the pgxpool.Pool, the final DSN string, and an error.
+// ConnectPools establishes both a standard library `sql.DB` connection pool and
+// a `pgxpool.Pool` connection pool to the specified test database.
+//
+// It constructs the DSN based on the provided config and testDBName, attempts to
+// connect and ping both pools, and returns the established pools along with the
+// DSN used. If any step fails, it ensures previously opened resources are closed
+// before returning an error.
 func ConnectPools(ctx context.Context, config config.Config, testDBName string, logger *zap.Logger) (*sql.DB, *pgxpool.Pool, string, error) {
 	// --- Prepare DSN for the Test Database ---
 	testDbConfig := config             // Copy config
@@ -72,8 +80,14 @@ func ConnectPools(ctx context.Context, config config.Config, testDBName string, 
 	return db, pool, testDbDSN, nil
 }
 
-// closeTestDBConnection returns a cleanup function to close the sql.DB pool.
-// It uses a pointer-to-pointer for db to allow setting the original variable to nil upon successful close.
+// CloseTestDBConnection returns a cleanup function suitable for use with
+// `cleanup.Manager`. The returned function closes the provided `sql.DB`
+// connection pool.
+//
+// It takes a pointer-to-a-pointer (`**sql.DB`) to the database pool. This allows
+// the cleanup function to set the original `*sql.DB` variable to `nil` after
+// successfully closing the connection, preventing potential double-close issues.
+// The DSN is used solely for logging purposes to identify the database being closed.
 func CloseTestDBConnection(dbPtr **sql.DB, dsn string, logger *zap.Logger) cleanup.Func {
 	return func() error {
 		db := *dbPtr
@@ -95,8 +109,14 @@ func CloseTestDBConnection(dbPtr **sql.DB, dsn string, logger *zap.Logger) clean
 	}
 }
 
-// closePgxPool returns a cleanup function to close the pgxpool.Pool.
-// It uses a pointer-to-pointer for pool to allow setting the original variable to nil upon successful close.
+// ClosePgxPool returns a cleanup function suitable for use with `cleanup.Manager`.
+// The returned function closes the provided `pgxpool.Pool`.
+//
+// It takes a pointer-to-a-pointer (`**pgxpool.Pool`) to the pool. This allows the
+// cleanup function to set the original `*pgxpool.Pool` variable to `nil` after
+// closing the pool, preventing potential issues with using a closed pool.
+// The DSN is used solely for logging purposes to identify the database being closed.
+// Note: `pgxpool.Pool.Close()` does not return an error.
 func ClosePgxPool(poolPtr **pgxpool.Pool, dsn string, logger *zap.Logger) cleanup.Func {
 	return func() error {
 		pool := *poolPtr
@@ -113,8 +133,12 @@ func ClosePgxPool(poolPtr **pgxpool.Pool, dsn string, logger *zap.Logger) cleanu
 	}
 }
 
-// GetDBNameFromDSN extracts the database name from a DSN string for logging purposes.
-// Returns "unknown" if parsing fails.
+// GetDBNameFromDSN attempts to extract the database name from a PostgreSQL DSN
+// string (e.g., "postgres://user:pass@host:port/dbname?sslmode=disable").
+// It's primarily used for providing more informative log messages during cleanup.
+//
+// Returns the extracted database name or "unknown" if parsing fails or the DSN
+// format is unexpected.
 func GetDBNameFromDSN(dsn string) string {
 	// Example DSN: postgres://user:pass@host:port/dbname?sslmode=disable
 	// Find the last '/'

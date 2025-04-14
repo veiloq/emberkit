@@ -1,3 +1,5 @@
+// Package atlas provides an implementation of the migration.Migrator interface
+// using the Atlas schema migration tool (ariga.io/atlas).
 package atlas
 
 import (
@@ -21,7 +23,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// AtlasMigrator implements the Migrator interface using the Atlas library.
+// AtlasMigrator implements the migration.Migrator interface using the core Atlas
+// library (ariga.io/atlas). It applies migrations defined in SQL files, typically
+// discovered via an `atlas.hcl` configuration file.
 type AtlasMigrator struct {
 	hclPath    string       // Path to the atlas.hcl file.
 	logger     *zap.Logger  // Logger instance.
@@ -32,8 +36,13 @@ type AtlasMigrator struct {
 	initErr    error        // Stores the *first* critical error from initialization attempt.
 }
 
-// NewAtlasMigrator creates a new AtlasMigrator.
-// Initialization (client creation, HCL parsing) is deferred until Apply is called.
+// NewAtlasMigrator creates a new AtlasMigrator instance configured to find migrations
+// based on the provided `atlas.hcl` file path.
+//
+// The actual initialization (parsing HCL, finding the migration directory) is
+// deferred until the first call to the Apply method to avoid unnecessary work
+// if migrations are not actually applied. A temporary logger is used here; the
+// logger passed to Apply will be used for the actual migration execution.
 func NewAtlasMigrator(hclPath string, logger *zap.Logger) *AtlasMigrator {
 	am := &AtlasMigrator{
 		hclPath: hclPath,
@@ -64,8 +73,14 @@ func NewAtlasMigrator(hclPath string, logger *zap.Logger) *AtlasMigrator {
 	return am
 }
 
-// Apply applies migrations using the core Atlas library.
-// It initializes the migration directory on the first call.
+// Apply implements the migration.Migrator interface. It ensures the Atlas
+// configuration (HCL parsing, migration directory discovery) is initialized (only
+// once) and then executes pending migrations against the database connected via
+// the provided pgxpool.Pool.
+//
+// If initialization failed previously or no migration directory was found, Apply
+// logs a warning and returns nil (skipping migrations). It uses the provided
+// logger for migration execution logging.
 func (am *AtlasMigrator) Apply(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) error {
 	// Initialize on first call (idempotent)
 	_ = am.initOnce() // We check am.initErr and am.migrateDir below

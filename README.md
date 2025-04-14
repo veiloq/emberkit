@@ -23,7 +23,7 @@ Alternatively, if you have Go installed, you can add the library to your project
 go get github.com/veiloq/emberkit@latest
 
 # Or to get a specific version (vMAJOR.YYYYMM.PATCH):
-go get github.com/veiloq/emberkit@v1.202504.1
+go get github.com/veiloq/emberkit@v1.202504.2
 ```
 
 Note: `emberkit` is intended to be used as a library within your Go tests, not as a standalone command-line tool.

@@ -1,3 +1,7 @@
+// Package emberkit_test contains integration tests for the emberkit package.
+// It utilizes the emberkit toolkit itself to create isolated database environments
+// for testing various features and configurations, including shared server mode,
+// migrations, hooks, and transaction helpers.
 package emberkit_test
 
 import (
@@ -36,11 +40,16 @@ import (
 )
 
 // --- Shared Server Setup ---
+// The following variables and functions manage a single, shared PostgreSQL
+// instance that can be used by multiple tests via the config.WithSharedServer option.
+// This avoids the overhead of starting/stopping a server for each test, speeding up
+// the test suite, especially when many tests need a database.
+// TestMain ensures the server is started once before tests run and stopped once after.
 
 var (
-	sharedServer          *embeddedpostgres.EmbeddedPostgres
-	sharedAdminDSN        string
-	sharedConfig          config.Config // Store the config used for the shared server
+	srv                   *embeddedpostgres.EmbeddedPostgres
+	dsn                   string
+	cgh                   config.Config // Store the config used for the shared server
 	sharedServerErr       error
 	startServerOnce       sync.Once
 	sharedServerLock      sync.Mutex // Protects access during setup/teardown phases if needed, though sync.Once handles startup.
@@ -50,8 +59,13 @@ var (
 
 const sharedRuntimeBasePath = ".emberkit" // Directory for the shared server's data
 
-// startSharedServer initializes and starts the single shared PostgreSQL server instance.
-// This function is called by startServerOnce.Do().
+// startSharedServer initializes and starts the single shared PostgreSQL server
+// instance used by tests configured with config.WithSharedServer. It handles
+// logger initialization, configuration (including random port assignment),
+// runtime directory creation, server startup via db.StartServer, and storing
+// the necessary server instance, admin DSN, and config for later use.
+// It uses sync.Once to ensure it runs only once for the entire test suite.
+// Any critical error during startup is stored in sharedServerErr.
 func startSharedServer() {
 	// No lock needed here as sync.Once guarantees single execution.
 
@@ -73,10 +87,10 @@ func startSharedServer() {
 	if cfg.StartTimeout == 0 {
 		cfg.StartTimeout = 30 * time.Second
 	}
-	sharedConfig = cfg // Store the base config
+	cgh = cfg // Store the base config
 
 	// 2. Assign Port (must happen before constructing admin DSN)
-	if err := db.AssignRandomPort(&sharedConfig, sharedLogger); err != nil {
+	if err := db.AssignRandomPort(&cgh, sharedLogger); err != nil {
 		sharedServerErr = fmt.Errorf("failed to assign random port for shared server: %w", err)
 		return
 	}
@@ -93,9 +107,9 @@ func startSharedServer() {
 
 	// 4. Start Server
 	// Use a context with timeout based on the config's StartTimeout
-	ctx, cancel := context.WithTimeout(context.Background(), sharedConfig.StartTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cgh.StartTimeout)
 	defer cancel()
-	server, err := db.StartServer(ctx, sharedConfig, instanceWorkDir, sharedLogger)
+	server, err := db.StartServer(ctx, cgh, instanceWorkDir, sharedLogger)
 	if err != nil {
 		sharedServerErr = fmt.Errorf("failed to start shared embedded server: %w", err)
 		// Attempt cleanup of runtime dir if server failed to start
@@ -105,29 +119,32 @@ func startSharedServer() {
 		}
 		return
 	}
-	sharedServer = server
+	srv = server
 
 	// 5. Construct Admin DSN (using the final config with assigned port)
 	// Use the 'postgres' database for admin tasks like creating/dropping other DBs.
-	sharedAdminDSN = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		sharedConfig.Username, sharedConfig.Password, sharedConfig.Host, sharedConfig.Port, "postgres")
+	dsn = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		cgh.Username, cgh.Password, cgh.Host, cgh.Port, "postgres")
 
 	sharedLogger.Info("Shared PostgreSQL server started successfully",
-		zap.Uint32("port", sharedConfig.Port),
+		zap.Uint32("port", cgh.Port),
 		// Mask password in log for security
-		zap.String("adminDSN", strings.Replace(sharedAdminDSN, sharedConfig.Password, "****", 1)),
+		zap.String("adminDSN", strings.Replace(dsn, cgh.Password, "****", 1)),
 		zap.String("runtimePath", instanceWorkDir),
 	)
 }
 
-// stopSharedServer stops the shared server and cleans up its runtime directory.
+// stopSharedServer stops the shared PostgreSQL server instance and cleans up its
+// associated runtime directory. It ensures the server is stopped gracefully and
+// removes the data directory created during startup. This function is typically
+// called via defer in TestMain.
 func stopSharedServer() {
 	// Lock might be useful if multiple goroutines could potentially call this,
 	// although in TestMain defer, it's typically single-threaded.
 	sharedServerLock.Lock()
 	defer sharedServerLock.Unlock()
 
-	if sharedServer == nil {
+	if srv == nil {
 		if sharedLogger != nil { // Check if logger was initialized
 			sharedLogger.Debug("Shared server already stopped or never started.")
 		}
@@ -142,7 +159,7 @@ func stopSharedServer() {
 	sharedLogger.Info("Stopping shared PostgreSQL server...")
 	// Use the StopEmbeddedServer helper which returns a cleanup.Func
 	// Pass the address of the sharedServer variable.
-	cleanupFunc := db.StopEmbeddedServer(&sharedServer, sharedLogger)
+	cleanupFunc := db.StopEmbeddedServer(&srv, sharedLogger)
 	err := cleanupFunc() // Execute the cleanup function
 	if err != nil {
 		sharedLogger.Error("Error stopping shared server", zap.Error(err))
@@ -165,7 +182,11 @@ func stopSharedServer() {
 	// sharedServer is set to nil by StopEmbeddedServer on success
 }
 
-// TestMain manages the lifecycle of the shared PostgreSQL server.
+// TestMain is the entry point for the test suite. It manages the lifecycle of the
+// shared PostgreSQL server instance used by some tests. It ensures the shared
+// server is started exactly once before any tests run (using startSharedServer
+// and sync.Once) and stopped exactly once after all tests complete (using defer
+// stopSharedServer). If the shared server fails to start, it aborts the tests.
 func TestMain(m *testing.M) {
 	// Start the shared server exactly once before any tests run.
 	startServerOnce.Do(startSharedServer)
@@ -192,10 +213,14 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-// --- Test Helpers (databaseExists, tableExists remain the same) ---
+// --- Test Helpers ---
 
-// Helper function to check if a database exists
-// NOTE: Keep raw SQL as sqlc cannot generate this query.
+// databaseExists checks if a database with the given name exists on the server
+// accessible via the adminDSN. It connects using the admin DSN (typically to the
+// 'postgres' database) and queries the pg_database catalog.
+// It logs warnings but does not fail the test if connection or query errors occur,
+// returning false in such cases.
+// NOTE: Uses raw SQL as this specific query is not suitable for sqlc generation.
 func databaseExists(t *testing.T, adminDSN, dbName string) bool {
 	t.Helper()
 	ctx := context.Background()
@@ -223,8 +248,10 @@ func databaseExists(t *testing.T, adminDSN, dbName string) bool {
 	return exists
 }
 
-// Helper function to check if a table exists in a specific database
-// Uses sqlc generated code.
+// tableExists checks if a table with the given name exists in the database
+// connected via the provided pgxpool.Pool.
+// It utilizes the sqlc-generated `TableExists` query from the snippets package.
+// It fails the test using require.NoError if the underlying query fails.
 func tableExists(t *testing.T, pool *pgxpool.Pool, tableName string) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -235,6 +262,10 @@ func tableExists(t *testing.T, pool *pgxpool.Pool, tableName string) bool {
 	return exists
 }
 
+// TestNewEmberKit_Defaults verifies the behavior of NewEmberKit when called with
+// default configuration and no functional options. It checks that the kit is
+// created successfully, connections are established, and the default NoOpMigrator
+// results in an empty database (no 'test_items' table).
 func TestNewEmberKit_Defaults(t *testing.T) {
 	ctx := context.Background()
 	baseCfg := config.DefaultConfig()                 // Use value
@@ -258,6 +289,9 @@ func TestNewEmberKit_Defaults(t *testing.T) {
 
 // Rationale: Passed config by value. Removed unreliable cleanup check for default case.
 
+// TestNewEmberKit_WithOptions groups tests for various functional options provided
+// to NewEmberKit, verifying their respective effects on the setup process and
+// the resulting EmberKit instance.
 func TestNewEmberKit_WithOptions(t *testing.T) {
 	var beforeHookCalled atomic.Bool
 	var afterHookCalled atomic.Bool
@@ -414,8 +448,15 @@ func TestNewEmberKit_WithOptions(t *testing.T) {
 
 // NOTE: Illustrative tests (Concurrent, Property) will be moved or kept here
 
-// --- Illustrative Tests ---
+// --- Illustrative Integration Tests ---
+// These tests demonstrate more complex scenarios using EmberKit, such as
+// concurrent database access patterns.
 
+// TestConcurrentAccess_Illustrative simulates concurrent updates to the database
+// using multiple goroutines accessing the connection pool provided by EmberKit.
+// It verifies that updates occur and that no deadlocks or obvious race conditions
+// arise during simple concurrent operations. It uses sqlc-generated functions
+// for database interactions.
 func TestConcurrentAccess_Illustrative(t *testing.T) {
 	ctx := context.Background()
 	baseCfg := config.DefaultConfig()                 // Use value
@@ -501,10 +542,17 @@ func TestConcurrentAccess_Illustrative(t *testing.T) {
 }
 
 // Hypothetical function to test
+// SanitizeDBString is a simple hypothetical function used for property-based testing.
+// It replaces single quotes with double single quotes, a basic form of SQL string escaping.
 func SanitizeDBString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
+// TestSanitizeDBString_Property demonstrates property-based testing using
+// testing/quick. It checks two properties of the SanitizeDBString function:
+//  1. Idempotency: Applying the function twice yields the same result as applying it once.
+//  2. Correctness: The output string should not contain any unescaped single quotes
+//     (unless the input already contained escaped quotes).
 func TestSanitizeDBString_Property(t *testing.T) {
 	prop := func(s string) bool {
 		sanitizedOnce := SanitizeDBString(s)
