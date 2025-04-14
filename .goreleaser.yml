@@ -95,9 +95,6 @@ changelog:
 release:
   # Repo details are usually inferred from the git remote.
   # Explicitly configure only if needed or for Gitea.
-  github:
-    owner: veiloq
-    name: emberkit
   # gitea:
   #   owner: "{{ .Env.GITEA_OWNER }}" # Set GITEA_OWNER env var
   #   name: "{{ .Env.GITEA_REPO }}"  # Set GITEA_REPO env var
