@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed by checkout to push tags, and by goreleaser to create releases
+      id-token: write # Needed for OIDC if used by goreleaser/cosign
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for tag history
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run Go Tests
+        run: make test
+
+      - name: Set CalVer Tag
+        run: |
+          MAJOR_VER=$(cat MAJOR)
+          PATCH_VER=$(cat PATCH)
+          DATE_PART=$(date +'%Y%m')
+          VERSION="v${MAJOR_VER}.${DATE_PART}.${PATCH_VER}"
+          echo "VERSION := ${VERSION}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git ls-remote --exit-code --tags origin refs/tags/${{ env.VERSION }}; then
+            echo "Tag ${{ env.VERSION }} already exists."
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag ${{ env.VERSION }} does not exist. Proceeding..."
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and Push Git Tag
+        if: steps.check_tag.outputs.tag_exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ env.VERSION }}
+          git push origin ${{ env.VERSION }}
+
+      - name: Run GoReleaser
+        if: steps.check_tag.outputs.tag_exists == 'false'
+        uses: goreleaser/goreleaser-action@v6
+        # Run only if the tagger step succeeded (meaning the tag was created and pushed)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ env.VERSION }}
+
+        with:
+          version: latest
+          args: release --clean
