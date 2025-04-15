@@ -1,3 +1,5 @@
+# WIP 🚧
+
 # emberkit - Go PostgreSQL Integration Testing Toolkit
 
 `emberkit` is a Go testing toolkit designed to simplify integration testing with PostgreSQL. It manages embedded PostgreSQL database instances, providing a clean and isolated environment for each test run, ensuring reliable and repeatable tests without external dependencies.
