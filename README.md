@@ -266,7 +266,7 @@ This allows complete control over the migration process if the built-in options 
 
 ## Versioning
 
-This project uses Calendar Versioning (CalVer) with the format `vMAJOR.YYYYMM.PATCH`.
+This project uses [Calendar Versioning (CalVer)](https://github.com/veiloq/scalver) with the format `vMAJOR.YYYYMM.PATCH`.
 
 *   `MAJOR`: Incremented for breaking changes.
 *   `YYYYMM`: Represents the year and month of the release.
